@@ -137,39 +137,23 @@ def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):
     A_motion_data = load_motion_data(A_pose_bvh_path)
     num_frames = A_motion_data.shape[0]
 
-    joint_map = {name: T_joint_name.index(name) for name in A_joint_name if name in T_joint_name}
+    joint_map = {A_joint_index: T_joint_name.index(A_joint_name) for A_joint_index in range(0, len(A_joint_name)) if A_joint_name[A_joint_index] in T_joint_name}
 
     motion_data = np.zeros((num_frames, len(T_joint_name) * 3 + 3))
 
     for frame_id in range(num_frames):
-        A_joint_positions, A_joint_orientations = part2_forward_kinematics(A_joint_name, A_joint_parent, A_joint_offset, A_motion_data, frame_id)
+        for A_joint_index, T_joint_index in joint_map.items():
+            A_joint_rotation = A_motion_data[frame_id, A_joint_index * 3 + 3 : A_joint_index * 3 + 6]
+            A_joint_rotation = R.from_euler('XYZ', A_joint_rotation, degrees=True)
 
-        root_position = A_motion_data[frame_id, :3]
-        root_orientation = A_motion_data[frame_id, 3:6]
-        motion_data[frame_id, :3] = root_position
-        motion_data[frame_id, 3:6] = root_orientation
+            T_joint_coord = T_joint_offset[T_joint_index]
+            A_joint_coord = A_joint_offset[A_joint_index]
 
-        channel_index = 6
-        for A_index in range(1, len(A_joint_name)):
-            A_joint = A_joint_name[A_index]
-            if A_joint not in joint_map:
-                continue
+            rotation_matrix = A_joint_rotation.as_matrix()
+            transformed_coord = rotation_matrix @ (A_joint_coord - T_joint_coord) + T_joint_coord
 
-            T_index = joint_map[A_joint]
-            if T_index == 0:
-                continue
-
-            A_parent_index = A_joint_parent[A_index]
-            T_parent_index = joint_map.get(A_joint_name[A_parent_index], -1)
-
-            if T_parent_index == -1:
-                continue
-
-            A_local_rotation = R.from_quat(A_joint_orientations[A_parent_index]).inv() * R.from_quat(A_joint_orientations[A_index])
-
-            T_local_rotation_euler = A_local_rotation.as_euler('XYZ', degrees=True)
-            motion_data[frame_id, channel_index : channel_index + 3] = T_local_rotation_euler
-
-            channel_index += 3
+            T_joint_rotation = R.from_matrix(rotation_matrix).as_euler('XYZ', degrees=True)
+            motion_data[frame_id, T_joint_index * 3 + 3 : T_joint_index * 3 + 6] = T_joint_rotation
 
     return motion_data
+
