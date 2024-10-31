@@ -5,18 +5,36 @@ from scipy.spatial.transform import Rotation as R
 
 from lab1.task2_inverse_kinematics import MetaData
 
+def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orientations, target_position, precision, max_interation):
+    # joint_chain是root到end，end_part是从end到根骨骼，root_part是root到根骨骼
+    joint_chain, path_name, end_part, root_part = meta_data.get_path_from_root_to_end()
+    joint_num = len(meta_data.joint_name)
 
-def solve_ccd_ik(meta_data: MetaData, joint_positions, joint_orientations, target_position, precision, max_interation):
-    # end_part是从end到根骨骼，root_part是root到根骨骼
-    joint_chain, end_part, root_part = meta_data.get_path_from_root_to_end()
+    def fk_from_index(start_index, rotation, end_index = joint_num):
+        parent_indices = [start_index]
+
+        for joint_index in range(start_index + 1, joint_num):
+            if joint_index == end_index:
+                continue
+
+            parent_index = meta_data.joint_parent[joint_index]
+
+            if parent_index not in parent_indices:
+                continue
+
+            joint_orientations[joint_index] = (R.from_quat(joint_orientations[joint_index]) * rotation).as_quat()
+            joint_positions[joint_index] = R.from_quat(joint_orientations[parent_index]).apply(joint_offsets[joint_index]) + joint_positions[parent_index]
+
+            parent_indices.append(joint_index)
 
     def update_joint(joint_index_in_chain):
         joint_index = joint_chain[joint_index_in_chain]
         joint_position = joint_positions[joint_index]
         joint_orientation = joint_orientations[joint_index]
-        tip_position = joint_positions[joint_chain[-1]]
 
         # 计算旋转
+        tip_position = joint_positions[joint_chain[-1]]
+
         vec_to_tip = tip_position - joint_position
         vec_to_tip /= np.linalg.norm(vec_to_tip)
 
@@ -28,24 +46,44 @@ def solve_ccd_ik(meta_data: MetaData, joint_positions, joint_orientations, targe
             return
 
         rotation_axis = np.cross(vec_to_tip, vec_to_target)
-        rotation_axis /= np.linalg.norm(rotation_axis)
+        norm = np.linalg.norm(rotation_axis)
+        if norm < 1e-6:
+            return
+        rotation_axis /= norm
 
         rotvec = angle_to_rotate * rotation_axis
         rotation = R.from_rotvec(rotvec)
 
         # 应用旋转
+
         if joint_index in end_part:
-            current_orientation = R.from_quat(joint_orientation)
-            new_orientation = current_orientation * rotation
+            joint_orientations[joint_index] = (R.from_quat(joint_orientation) * rotation).as_quat()
 
-            joint_orientations[joint_index] = new_orientation
+            fk_from_index(joint_index, rotation)
 
-        # 更新所有子joint的位置和朝向
+        # TODO：这里更新有问题
 
+        if joint_index in root_part and joint_index != 0:
+            root_joint_index = root_part[-1]
+            root_joint_position = joint_positions[root_joint_index]
+            current_position = joint_positions[joint_index]
 
+            vec_to_root_joint = root_joint_position - current_position
+            joint_positions[root_joint_index] = current_position + rotation.apply(vec_to_root_joint)
+            joint_orientations[root_joint_index] = (R.from_quat(joint_orientations[root_joint_index]) * rotation).as_quat()
 
+            fk_from_index(root_joint_index, rotation, joint_index)
 
-def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, target_pose):
+    for iteration in range(max_interation):
+        for index_in_chain in range(len(joint_chain) - 2, -1, -1):
+            update_joint(index_in_chain)
+
+            if np.linalg.norm(joint_positions[joint_chain[-1]] - target_position) < precision:
+                return joint_positions, joint_orientations
+
+    return joint_positions, joint_orientations
+
+def part1_inverse_kinematics(meta_data: MetaData, joint_positions, joint_orientations, target_pose):
     """
     完成函数，计算逆运动学
     输入: 
@@ -59,7 +97,17 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
         joint_orientations: 计算得到的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
     """
 
-    return joint_positions, joint_orientations
+    joint_offsets = []
+    joint_parent = meta_data.joint_parent
+    init_pos = meta_data.joint_initial_position
+    for i in range(len(joint_parent)):
+        parent_index = joint_parent[i]
+        if parent_index < 0:
+            joint_offsets.append(np.zeros(3))
+            continue
+        joint_offsets.append(init_pos[i] - init_pos[parent_index])
+
+    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.01, 1000)
 
 def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
     """
