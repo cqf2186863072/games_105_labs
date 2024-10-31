@@ -1,4 +1,6 @@
 import math
+import time
+from itertools import chain
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -56,23 +58,15 @@ def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orie
 
         # 应用旋转
 
-        if joint_index in end_part:
-            joint_orientations[joint_index] = (R.from_quat(joint_orientation) * rotation).as_quat()
+        joint_orientations[joint_index] = (R.from_quat(joint_orientations[joint_index]) * rotation).as_quat()
+        joint_index_in_chain += 1
+        while joint_index_in_chain < len(joint_chain):
+            index = joint_chain[joint_index_in_chain]
+            joint_orientations[index] = (R.from_quat(joint_orientations[index]) * rotation).as_quat()
+            parent_index = meta_data.joint_parent[index]
+            joint_positions[index] = joint_positions[parent_index] + R.from_quat(joint_orientations[parent_index]).apply(joint_offsets[index])
+            joint_index_in_chain += 1
 
-            fk_from_index(joint_index, rotation)
-
-        # TODO：这里更新有问题
-
-        if joint_index in root_part and joint_index != 0:
-            root_joint_index = root_part[-1]
-            root_joint_position = joint_positions[root_joint_index]
-            current_position = joint_positions[joint_index]
-
-            vec_to_root_joint = root_joint_position - current_position
-            joint_positions[root_joint_index] = current_position + rotation.apply(vec_to_root_joint)
-            joint_orientations[root_joint_index] = (R.from_quat(joint_orientations[root_joint_index]) * rotation).as_quat()
-
-            fk_from_index(root_joint_index, rotation, joint_index)
 
     for iteration in range(max_interation):
         for index_in_chain in range(len(joint_chain) - 2, -1, -1):
@@ -107,7 +101,7 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions, joint_orienta
             continue
         joint_offsets.append(init_pos[i] - init_pos[parent_index])
 
-    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.01, 1000)
+    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.1, 1000)
 
 def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
     """
