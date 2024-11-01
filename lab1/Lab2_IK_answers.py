@@ -1,6 +1,7 @@
 import math
 import time
 from itertools import chain
+from turtledemo.penrose import start
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -11,23 +12,6 @@ def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orie
     # joint_chain是root到end，end_part是从end到根骨骼，root_part是root到根骨骼
     joint_chain, path_name, end_part, root_part = meta_data.get_path_from_root_to_end()
     joint_num = len(meta_data.joint_name)
-
-    def fk_from_index(start_index, rotation, end_index = joint_num):
-        parent_indices = [start_index]
-
-        for joint_index in range(start_index + 1, joint_num):
-            if joint_index == end_index:
-                continue
-
-            parent_index = meta_data.joint_parent[joint_index]
-
-            if parent_index not in parent_indices:
-                continue
-
-            joint_orientations[joint_index] = (R.from_quat(joint_orientations[joint_index]) * rotation).as_quat()
-            joint_positions[joint_index] = R.from_quat(joint_orientations[parent_index]).apply(joint_offsets[joint_index]) + joint_positions[parent_index]
-
-            parent_indices.append(joint_index)
 
     def update_joint(joint_index_in_chain):
         joint_index = joint_chain[joint_index_in_chain]
@@ -56,20 +40,41 @@ def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orie
         rotvec = angle_to_rotate * rotation_axis
         rotation = R.from_rotvec(rotvec)
 
-        # 应用旋转
+        # 更新骨骼链
 
-        joint_orientations[joint_index] = (R.from_quat(joint_orientations[joint_index]) * rotation).as_quat()
-        joint_index_in_chain += 1
+        if joint_index in root_part:
+            joint_index_in_chain += 1
+
+        parent_indices = joint_chain[joint_index_in_chain : ] # 用于更新其他骨骼
+
         while joint_index_in_chain < len(joint_chain):
             index = joint_chain[joint_index_in_chain]
             joint_orientations[index] = (R.from_quat(joint_orientations[index]) * rotation).as_quat()
-            parent_index = meta_data.joint_parent[index]
-            joint_positions[index] = joint_positions[parent_index] + R.from_quat(joint_orientations[parent_index]).apply(joint_offsets[index])
+            parent_in_chain_index = joint_chain[joint_index_in_chain - 1]  # 在骨骼链中的父节点
+
+            if index in end_part:
+                joint_positions[index] = joint_positions[parent_in_chain_index] + R.from_quat(joint_orientations[parent_in_chain_index]).apply(joint_offsets[index])
+            elif index in root_part:
+                joint_positions[index] = joint_positions[parent_in_chain_index] - R.from_quat(joint_orientations[index]).apply(joint_offsets[parent_in_chain_index])
+
             joint_index_in_chain += 1
 
+        # 更新其余骨骼
+
+        for index in range(0, joint_num):
+            if index in joint_chain:
+                continue
+
+            parent_index = meta_data.joint_parent[index]
+            if parent_index not in parent_indices:
+                continue
+
+            joint_orientations[index] = (R.from_quat(joint_orientations[index]) * rotation).as_quat()
+            joint_positions[index] = joint_positions[parent_index] + R.from_quat(joint_orientations[parent_index]).apply(joint_offsets[index])
+            parent_indices.append(index)
 
     for iteration in range(max_interation):
-        for index_in_chain in range(len(joint_chain) - 2, -1, -1):
+        for index_in_chain in range(len(joint_chain) - 2, 0, -1):
             update_joint(index_in_chain)
 
             if np.linalg.norm(joint_positions[joint_chain[-1]] - target_position) < precision:
@@ -101,7 +106,7 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions, joint_orienta
             continue
         joint_offsets.append(init_pos[i] - init_pos[parent_index])
 
-    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.1, 1000)
+    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.0001, 1000)
 
 def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
     """
