@@ -9,9 +9,10 @@ from scipy.spatial.transform import Rotation as R
 from lab1.task2_inverse_kinematics import MetaData
 
 def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orientations, target_position, precision, max_interation):
-    # joint_chain是root到end，end_part是从end到根骨骼，root_part是root到根骨骼
-    joint_chain, path_name, end_part, root_part = meta_data.get_path_from_root_to_end()
+    joint_chain, path_name, end_part, root_part = meta_data.get_path_from_root_to_end() # joint_chain是root到end，end_part是从end到根骨骼，root_part是root到根骨骼
     joint_num = len(meta_data.joint_name)
+    max_angle = np.radians(10)  # 单次最大旋转角度(弧度)
+    distance = np.linalg.norm(joint_positions[joint_chain[-1]] - target_position)
 
     def update_joint(joint_index_in_chain):
         joint_index = joint_chain[joint_index_in_chain]
@@ -28,6 +29,7 @@ def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orie
         vec_to_target /= np.linalg.norm(vec_to_target)
 
         angle_to_rotate = np.arccos(np.clip(np.dot(vec_to_target, vec_to_tip), -1.0, 1.0))
+        angle_to_rotate = np.clip(angle_to_rotate, -max_angle, max_angle)  # 保证效果的关键！！！
         if angle_to_rotate < precision:
             return
 
@@ -79,6 +81,8 @@ def solve_ccd_ik(meta_data: MetaData, joint_offsets, joint_positions, joint_orie
 
             if np.linalg.norm(joint_positions[joint_chain[-1]] - target_position) < precision:
                 return joint_positions, joint_orientations
+        distance = np.linalg.norm(joint_positions[joint_chain[-1]] - target_position)
+        print(f"第{iteration}次: {distance}")
 
     return joint_positions, joint_orientations
 
@@ -106,7 +110,7 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions, joint_orienta
             continue
         joint_offsets.append(init_pos[i] - init_pos[parent_index])
 
-    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.0001, 1000)
+    return solve_ccd_ik(meta_data, joint_offsets, joint_positions, joint_orientations, target_pose, 0.01, 100)
 
 def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
     """
